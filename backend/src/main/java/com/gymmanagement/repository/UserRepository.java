@@ -1,0 +1,22 @@
+package com.gymmanagement.repository;
+
+import com.gymmanagement.entity.User;
+import com.gymmanagement.enums.Role;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findByEmail(String email);
+    boolean existsByEmail(String email);
+    List<User> findByRole(Role role);
+    List<User> findByRoleOrderByCreatedAtDesc(Role role);
+    List<User> findAllByOrderByCreatedAtDesc();
+    List<User> findTop10ByOrderByCreatedAtDesc();
+    List<User> findByRoleAndActive(Role role, boolean active);
+    long countByRole(Role role);
+    long countByRoleAndActive(Role role, boolean active);
+}

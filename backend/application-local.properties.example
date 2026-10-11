@@ -1,0 +1,10 @@
+# ===================================================================
+# Local Development Database Configuration Template
+# ===================================================================
+# Copy this file to 'application-local.properties' in this directory.
+# 'application-local.properties' is excluded by .gitignore to keep your credentials private.
+#
+# Enter your local MySQL root password below:
+# spring.datasource.password=your_mysql_password
+# spring.datasource.username=root
+# spring.datasource.url=jdbc:mysql://localhost:3306/smart_gym_management?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true

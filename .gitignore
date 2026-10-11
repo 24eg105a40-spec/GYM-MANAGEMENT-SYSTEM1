@@ -1,0 +1,21 @@
+# Dependencies & build outputs
+node_modules/
+dist/
+target/
+
+# Local credentials & environment
+.env
+*.env
+application-local.properties
+config/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.iml
+*.log
+.DS_Store
+powershell.bat
+powershell.cmd
+.vite/
+*.tmp
