@@ -1,5 +1,5 @@
 {
-  "name": "smart-gym-frontend",
+  "name": "connected-vehicle-telemetry-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -14,9 +14,11 @@
     "axios": "^1.7.9",
     "bootstrap": "^5.3.3",
     "bootstrap-icons": "^1.11.3",
+    "lucide-react": "^1.56.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^6.28.0"
+    "react-router-dom": "^6.28.0",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

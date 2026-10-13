@@ -1,89 +1,106 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authApi } from '../api/authApi';
+import { telemetryApi } from '../api/telemetryApi';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token') || null);
-  const [loading, setLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   useEffect(() => {
-    const initializeAuth = async () => {
-      const storedToken = localStorage.getItem('token');
-      const storedUser = localStorage.getItem('user');
-
-      if (storedToken) {
-        if (storedUser) {
-          try {
-            setUser(JSON.parse(storedUser));
-          } catch (e) {
-            console.error('Failed to parse cached user', e);
+    const checkAuth = async () => {
+      try {
+        const me = await telemetryApi.getMe();
+        if (me) {
+          setUser(me);
+        } else {
+          // Check if user was previously saved in session for demo mode
+          const savedDemo = sessionStorage.getItem('vt_demo_user');
+          if (savedDemo) {
+            setUser(JSON.parse(savedDemo));
+            setIsDemoMode(true);
           }
         }
-        try {
-          const freshUser = await authApi.getMe();
-          setUser(freshUser);
-          localStorage.setItem('user', JSON.stringify(freshUser));
-        } catch (err) {
-          console.warn('Session check failed or expired', err);
-          logout();
+      } catch (err) {
+        const savedDemo = sessionStorage.getItem('vt_demo_user');
+        if (savedDemo) {
+          setUser(JSON.parse(savedDemo));
+          setIsDemoMode(true);
         }
+      } finally {
+        setIsLoading(false);
       }
-      setLoading(false);
     };
-
-    initializeAuth();
+    checkAuth();
   }, []);
 
   const login = async (email, password) => {
-    const data = await authApi.login({ email, password });
-    setToken(data.token);
-    localStorage.setItem('token', data.token);
-
-    const userData = {
-      id: data.id,
-      fullName: data.fullName,
-      email: data.email,
-      phone: data.phone,
-      role: data.role,
-    };
-    setUser(userData);
-    localStorage.setItem('user', JSON.stringify(userData));
-    return userData;
+    setIsLoading(true);
+    try {
+      const data = await telemetryApi.login(email, password);
+      setUser(data);
+      if (!telemetryApi.isBackendHealthy()) {
+        setIsDemoMode(true);
+        sessionStorage.setItem('vt_demo_user', JSON.stringify(data));
+      }
+      return { success: true, user: data };
+    } catch (err) {
+      return { 
+        success: false, 
+        message: err.response?.data?.message || err.message || 'Invalid email or password' 
+      };
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const register = async (fullName, email, phone, password) => {
-    return await authApi.register({ fullName, email, phone, password });
+  const register = async (email, password, fullName) => {
+    setIsLoading(true);
+    try {
+      const data = await telemetryApi.register(email, password, fullName);
+      return { success: true, user: data };
+    } catch (err) {
+      return { 
+        success: false, 
+        message: err.response?.data?.message || err.message || 'Registration failed' 
+      };
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const logout = () => {
-    setUser(null);
-    setToken(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+  const logout = async () => {
+    try {
+      await telemetryApi.logout();
+    } finally {
+      setUser(null);
+      setIsDemoMode(false);
+      sessionStorage.removeItem('vt_demo_user');
+    }
   };
 
-  const updateUserProfile = (updatedData) => {
-    setUser((prev) => {
-      const updated = { ...prev, ...updatedData };
-      localStorage.setItem('user', JSON.stringify(updated));
-      return updated;
-    });
+  const enterDemoMode = (role = 'ADMIN') => {
+    const demoUser = role === 'ADMIN'
+      ? { id: 1, email: 'admin@telemetry.io', fullName: 'System Administrator (Demo)', role: 'ADMIN', status: 'ACTIVE' }
+      : { id: 2, email: 'client1@telemetry.io', fullName: 'Client One (Demo)', role: 'CLIENT', status: 'ACTIVE' };
+    setUser(demoUser);
+    setIsDemoMode(true);
+    sessionStorage.setItem('vt_demo_user', JSON.stringify(demoUser));
+    return demoUser;
   };
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        token,
-        isAuthenticated: !!token && !!user,
-        role: user?.role || null,
-        loading,
+        isAuthenticated: !!user,
+        isLoading,
+        isDemoMode,
         login,
         register,
         logout,
-        updateUserProfile,
+        enterDemoMode,
       }}
     >
       {children}
@@ -92,9 +109,7 @@ export const AuthProvider = ({ children }) => {
 };
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+  return ctx;
 };

@@ -1,128 +1,93 @@
-# System Architecture Documentation
+# System Architecture & Technical Design
 
-## Smart Gym Management and Membership Tracking System
-
-This document outlines the layered full-stack architectural design, security boundaries, and data flow sequences for the Smart Gym application.
+## Connected Vehicle Telemetry System
 
 ---
 
-### 1. High-Level System Architecture
+## 1. High-Level Architecture Overview
 
-```mermaid
-graph TD
-    subgraph Client Tier ["Client Tier (Browser)"]
-        UI["React 19 + Vite Frontend<br/>(Bootstrap 5, Vanilla CSS)"]
-        Router["React Router DOM (Client Routing)"]
-        Context["AuthContext & State Management"]
-        Axios["Centralized Axios HTTP Client"]
-    end
+The **Connected Vehicle Telemetry System** is structured as an industry-standard, 3-tier enterprise architecture tailored for modern telematics ingestion, stream processing, threshold analysis, and responsive cockpit visualization:
 
-    subgraph Security Layer ["Security & Interception"]
-        JWTInterceptor["Request Interceptor (Bearer Token)"]
-        SecurityFilterChain["Spring Security Filter Chain"]
-        JwtFilter["JwtAuthenticationFilter"]
-        EntryPoint["JwtAuthenticationEntryPoint (401/403)"]
-    end
-
-    subgraph Backend Tier ["Application Tier (Spring Boot 3.2.5)"]
-        Controllers["REST Controllers (@RestController)"]
-        Services["Business Service Layer (@Service, @Transactional)"]
-        DTOs["DTO Layer (Request / Response Separation)"]
-        Advice["GlobalExceptionHandler (@ControllerAdvice)"]
-        Repos["Spring Data JPA Repositories"]
-    end
-
-    subgraph Persistence Tier ["Data Tier"]
-        Hibernate["Hibernate 6 ORM"]
-        MySQL[("MySQL 8.x Database<br/>(InnoDB, UTF8mb4)")]
-    end
-
-    UI --> Router
-    Router --> Context
-    Context --> Axios
-    Axios -->|HTTP + Bearer Token| JWTInterceptor
-    JWTInterceptor --> SecurityFilterChain
-    SecurityFilterChain --> JwtFilter
-    JwtFilter -->|Valid Token| Controllers
-    JwtFilter -->|Invalid / Missing| EntryPoint
-    Controllers --> DTOs
-    Controllers --> Services
-    Services --> Repos
-    Services --> Advice
-    Repos --> Hibernate
-    Hibernate --> MySQL
+```
++-----------------------------------------------------------------------------------------+
+|                                    PRESENTATION TIER                                    |
+|                                                                                         |
+|       React 19 Single Page App (SPA) + Vite 6 + Recharts + CSS Dark Automotive Cockpit    |
+|       • Fleet Operations Center (Dashboard)       • Vehicle Telemetry Graphs (Speed/Temp)|
+|       • Searchable Vehicle Directory             • Alert Management (Ack & Resolve)     |
+|       • Radar GPS Visualizer                     • Historical Telemetry Log & CSV Export|
++--------------------------------------------+--------------------------------------------+
+                                             |
+                                             | HTTP / REST (JSON) via Vite Proxy /api
+                                             v
++-----------------------------------------------------------------------------------------+
+|                                    APPLICATION TIER                                     |
+|                                                                                         |
+|                         Java 17/25 + Spring Boot 3.2.5 REST API                          |
+|                                                                                         |
+|  [REST Controllers]  ----------------------------------------------------------------+  |
+|  • VehicleController      • TelemetryController    • AlertController                 |  |
+|  • DashboardController    • SimulationController                                     |  |
+|                                                                                      |  |
+|  [Service Layer]  -------------------------------------------------------------------+  |
+|  • VehicleService         • TelemetryService       • AlertService                    |  |
+|  • SimulationService (@Scheduled background drift engine)                           |  |
+|  • DataSeeder (Initial 10 vehicles, 250 historical points, 3 active alerts)          |  |
+|                                                                                      |  |
+|  [Spring Data JPA Repositories]  ----------------------------------------------------+  |
+|  • VehicleRepository      • TelemetryRecordRepository  • AlertRepository             |  |
++--------------------------------------------+--------------------------------------------+
+                                             |
+                                             | JDBC / Hibernate ORM Dialect
+                                             v
++-----------------------------------------------------------------------------------------+
+|                                       DATA TIER                                         |
+|                                                                                         |
+|  [Default Engine]: Embedded H2 Database (In-Memory, Zero Setup, Instant Execution)       |
+|  [Enterprise Engine]: MySQL 8.x Connector (via --spring.profiles.active=mysql)          |
++-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-### 2. End-to-End Membership & Payment Activation Flow
+## 2. Telemetry Simulation Physics & Mathematical Model
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Member as Gym Member
-    actor Admin as Gym Administrator
-    participant Frontend as React Client
-    participant Controller as Membership & Payment Controller
-    participant Service as Business Services
-    participant DB as MySQL Database
+In a real vehicle fleet, sensor data originates from Controller Area Network (CAN-bus) frames and On-Board Diagnostics (OBD-II / J1939 protocols). To simulate this autonomously without requiring physical hardware:
 
-    Member->>Frontend: Select Plan & Click "Subscribe"
-    Frontend->>Controller: POST /api/memberships (planId)
-    Controller->>Service: createMembershipRequest()
-    Service->>DB: INSERT INTO memberships (status='PENDING')
-    DB-->>Frontend: 201 Created (Membership #ID)
+1. **Speed Drift (`v(t)`)**:
+   - Every 4000 milliseconds, each online vehicle experiences a random speed variance:
+     $$\Delta v \in [-5.0, +5.0] \text{ km/h}$$
+   - Clamped within realistic vehicle operational limits: $10 \le v \le 125 \text{ km/h}$.
 
-    Member->>Frontend: Submit Payment Reference / UTR
-    Frontend->>Controller: POST /api/payments (membershipId, amount, method, ref)
-    Controller->>Service: recordPayment()
-    Service->>DB: INSERT INTO payments (status='PENDING')
-    DB-->>Frontend: 201 Created (Payment #ID)
+2. **Thermal Heat Dynamics (`T(t)`)**:
+   - Engine/motor temperature is proportional to sustained throttle demand:
+     $$T_{\text{target}} = 70.0 + \left(\frac{v}{125}\right) \times 28.0$$
+   - Temperature smoothly drifts towards target with natural thermal inertia plus stochastic noise:
+     $$\Delta T = 0.08 \times (T_{\text{target}} - T) + \text{noise}$$
 
-    Admin->>Frontend: Open Admin > Manage Payments
-    Frontend->>Controller: GET /api/admin/payments
-    Controller-->>Frontend: List of Pending Transactions
+3. **Energy / Battery Depletion (`SoC(t)`)**:
+   - State-of-charge decreases smoothly based on speed and time:
+     $$\Delta \text{SoC} = 0.03 + \left(\frac{v}{120}\right) \times 0.07$$
+   - Auto-recharges when dropping below 3% to simulate vehicle depot turnarounds.
 
-    Admin->>Frontend: Click "Verify Payment"
-    Frontend->>Controller: PATCH /api/admin/payments/{id}/verify
-    Controller->>Service: verifyPayment()
-    Note over Service,DB: Transactional Boundary: Updates payment and activates membership
-    Service->>DB: UPDATE payments SET status='VERIFIED', verified_by=adminId
-    Service->>DB: UPDATE memberships SET status='ACTIVE', start_date=today, end_date=today+days
-    DB-->>Frontend: 200 OK (Verified Payment & Activated Subscription)
-
-    Member->>Frontend: Visits Member Dashboard
-    Frontend->>Controller: GET /api/memberships/my
-    Controller-->>Frontend: Active Membership with Valid Dates & Remaining Days
-```
+4. **Geographical Vector Progression**:
+   - Coordinates advance along the vehicle compass heading ($\theta$) based on distance traveled ($d = \frac{v \times t}{3600}$):
+     $$\Delta \text{Lat} = \frac{d}{111.0} \times \cos(\theta)$$
+     $$\Delta \text{Lon} = \frac{d}{111.0 \times \cos(\text{Lat})} \times \sin(\theta)$$
 
 ---
 
-### 3. Role-Based Access Control (RBAC) Matrix
+## 3. Threshold Rule Engine & Alert Lifecycle
 
-| Resource / Endpoint | Public | MEMBER | TRAINER | ADMIN |
-|---|:---:|:---:|:---:|:---:|
-| `/api/auth/register`, `/login` | ✅ | ❌ | ❌ | ❌ |
-| `/api/membership-plans` (View) | ✅ | ✅ | ✅ | ✅ |
-| `/api/membership-plans` (CRUD) | ❌ | ❌ | ❌ | ✅ |
-| `/api/members/me` (Profile) | ❌ | ✅ | ❌ | ❌ |
-| `/api/attendance/check-in` | ❌ | ✅ (Active Only) | ❌ | ❌ |
-| `/api/attendance/my` | ❌ | ✅ | ❌ | ❌ |
-| `/api/admin/attendance/**` | ❌ | ❌ | ❌ | ✅ |
-| `/api/trainers/workout-plans/**` | ❌ | ❌ | ✅ (Assigned only)| ❌ |
-| `/api/members/me/workout-plans` | ❌ | ✅ (Read only) | ❌ | ❌ |
-| `/api/training-sessions` (Book) | ❌ | ✅ | ❌ | ❌ |
-| `/api/trainers/me/sessions` | ❌ | ❌ | ✅ | ❌ |
-| `/api/admin/dashboard` | ❌ | ❌ | ❌ | ✅ |
+The backend continuously verifies active vehicle metrics against safety thresholds:
 
----
+| Condition | Threshold | Alert Type | Severity | Action |
+| :--- | :--- | :--- | :--- | :--- |
+| Speed | $> 105.0$ km/h | `OVERSPEED` | `WARNING` | Log alert, flag vehicle status to `WARNING` |
+| Engine Heat | $> 95.0$ °C | `HIGH_TEMPERATURE` | `CRITICAL` | Log alert, flag vehicle status to `WARNING` |
+| Battery / Fuel | $< 15.0$ % | `LOW_BATTERY_FUEL` | `WARNING` | Warn operator of low energy reserve |
 
-### 4. Concurrency & Integrity Safeguards
-
-1. **Duplicate Check-In Safeguard**:
-   - `attendances` table holds a unique composite key `(member_id, attendance_date)`. If two simultaneous requests arrive, the second request fails at the database constraint level and is handled gracefully by Spring's `ConflictException`.
-2. **Session Slot Overlap Safeguard**:
-   - Before confirming or booking a training session, `TrainingSessionRepository` queries existing non-cancelled sessions for that trainer on the requested date and time interval:
-     `startTime < existingEndTime AND endTime > existingStartTime`.
-3. **Audit History Safeguard**:
-   - Memberships, trainer allocations, and workout plans maintain active flags and historical dates rather than physical hard deletes.
+### Alert Lifecycle:
+1. **`ACTIVE`**: Triggered automatically by threshold breach.
+2. **`ACKNOWLEDGED`**: Operator has viewed the issue and confirmed attention.
+3. **`RESOLVED`**: Issue has been cleared or vehicle serviced.
